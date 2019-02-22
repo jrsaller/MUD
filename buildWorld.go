@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strconv"
 )
 
 //STRUCTS WORLD BUILDING
@@ -28,6 +29,8 @@ type Exit struct {
 
 type Player struct {
 	Location *Room
+	Outputs  chan OutputEvent
+	Name     string
 }
 
 //READ WORLD COMMANDS
@@ -92,14 +95,62 @@ func ReadExits(tx *sql.Tx, rooms map[int]*Room) {
 	}
 }
 
-func ReadRoom(id int, rooms map[int]*Room) {
-	fmt.Println(rooms[id].Name + "\n")
-	fmt.Println(rooms[id].Description)
-	fmt.Printf("Directions: [ ")
+func ReadRoom(id int, rooms map[int]*Room, p *Player) {
+	description := rooms[id].Name + "\n"
+	description += rooms[id].Description + "\n"
+	description += "Directions: [ "
 	for index, element := range rooms[id].Exits {
 		if element.To != nil {
-			fmt.Printf(numToDirection[index] + " ")
+			description += numToDirection[index] + " "
 		}
 	}
-	fmt.Printf("]\n")
+	//fmt.Println("PRINTING TO PLAYER OUTPUTS")
+	p.Printf(description + "]\n")
+	//fmt.Println("END OF READ ROOM")
+	for _, item := range ActivePlayers {
+		if item.Location == rooms[id] && item != p {
+			p.Printf("You see " + item.Name + " standing here\n")
+		}
+	}
+}
+
+type playerInfo struct {
+	Name string
+	Salt string
+	Hash string
+}
+
+func ReadPlayers(tx *sql.Tx) map[string]playerInfo {
+	players = make(map[string]playerInfo)
+	pQuery, err := tx.Query("SELECT * FROM players")
+	if err != nil {
+		log.Fatal(err)
+	}
+	//var names []string
+	for pQuery.Next() {
+		var id int
+		var name string
+		var salt string
+		var hash string
+		pQuery.Scan(&id, &name, &salt, &hash)
+		players[name] = playerInfo{name, salt, hash}
+	}
+	return players
+}
+
+func (p *Player) Printf(format string, a ...interface{}) {
+	msg := fmt.Sprintf(format, a...)
+	p.Outputs <- OutputEvent{p, msg}
+}
+
+func makePlayerEntry(tx *sql.Tx, name string, salt string, hash string, numPlayers string) {
+	id, err := strconv.Atoi(numPlayers)
+	if err != nil {
+		log.Fatal(err)
+	}
+	id += 1
+	newid := strconv.Itoa(id)
+	queryString := "INSERT INTO players VALUES(" + newid + ",\"" + name + "\",\"" + salt + "\",\"" + hash + "\")"
+	tx.Exec(queryString)
+	players[name] = playerInfo{name, salt, hash}
 }
